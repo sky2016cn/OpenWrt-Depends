@@ -1,0 +1,87 @@
+name: update_dependency_LEDE
+
+on:
+  schedule:
+    - cron: '17 2 * * *'     # 北京时间早上 10 点 17 分左右运行（UTC+8）
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    # 显式声明 GitHub 机器人对仓库内容的最高写入权限
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v6
+
+      - name: Fetch and Build Depends Script
+        shell: python
+        run: |
+          import urllib.request
+          import re
+          import os
+
+          print("=== 1. 下载 Lede 最新 README.md ===")
+          url = "https://raw.githubusercontent.com/coolsnowwolf/lede/master/README.md"
+          try:
+              with urllib.request.urlopen(url) as response:
+                  readme_text = response.read().decode('utf-8')
+          except Exception as e:
+              print(f"❌ 下载失败: {e}")
+              exit(1)
+
+          print("=== 2. 正则精准抓取依赖安装命令 ===")
+          # 精准抓取 'sudo apt install -y' 开头，到下一个不以 '\' 结尾的整段命令行
+          match = re.search(r'(sudo apt install -y.*?[^\\])(?=\n|$)', readme_text, re.DOTALL)
+          if not match:
+              print("❌ 未匹配到依赖命令，请检查上游 Lede README 是否改版。")
+              exit(1)
+          
+          # 清理杂质
+          raw_cmd = match.group(1).strip()
+          clean_cmd = "\n".join([line.strip() for line in raw_cmd.split("\n") if "```" not in line])
+
+          print("=== 3. 组装并生成最终 depends-lede 脚本 ===")
+          script_content = f"""#!/bin/bash
+          set -e
+          # 自动同步自 coolsnowwolf/lede 编译依赖
+          # 项目地址：https://github.com/sky2016cn/OpenWrt-Depends
+
+          echo "=== 更新系统软件源 ==="
+          sudo apt update -y
+
+          echo "=== 安装 OpenWrt/LEDE 编译依赖 ==="
+          {clean_cmd}
+          """
+          
+          # 清理由于 Python 缩进带来的前导空格
+          final_script = "\n".join([line.strip() for line in script_content.strip().split("\n")])
+
+          # 写入文件
+          with open("depends-lede", "w", encoding="utf-8") as f:
+              f.write(final_script + "\n")
+          
+          print("✅ depends-lede 生成完成！")
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          chmod +x depends-lede
+          
+          # 1. 正常加入暂存区即可
+          git add depends-lede
+          
+          # 2. 检查暂存区 (--cached) 是否有真正的内容变动
+          if ! git diff --cached --quiet; then
+            git commit -m "自动更新：生成最新的 LEDE 编译依赖安装脚本"
+            git push origin main
+            echo "🚀 上游有更新，脚本已成功同步并推送到仓库！"
+          else
+            # 3. 干净利落地结束，什么都不做
+            echo "✨ 上游未发生变化，无需更新。"
+          fi
