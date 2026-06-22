@@ -1,9 +1,9 @@
 name: update_dependency_LEDE
 
 on:
-  #schedule:
-  #  - cron: '17 2 * * *'     # 北京时间早上 10 点 17 分左右运行（UTC+8）
-  #workflow_dispatch:
+  schedule:
+    - cron: '17 2 * * *'     # 北京时间早上 10 点 17 分左右运行（UTC+8）
+  workflow_dispatch:
 
 jobs:
   build:
